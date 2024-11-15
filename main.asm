@@ -281,10 +281,22 @@ write_loop:
     # Functionality: Write the element to the output file
 
     jal     float_to_string
-    la      $a1,                    float_string
+
+    la      $s4, float_string  # $s4 = address of the float_string
+    li      $s5, 0             # $s5 = 0 = counter for the float_string
+
+count_length:
+    lb      $t0, 0($s4)       # Current byte in the string
+    beq     $t0, $zero, end_count  # If null terminator, end counting
+    addi    $s4, $s4, 1        # $s4 = $s4 + 1 = move to the next byte
+    addi    $s5, $s5, 1        # $s5 = $s5 + 1 = increment counter
+    j       count_length
+end_count:
+
     li      $v0,                    15
-    li      $a2,                    3 
     move    $a0,                    $s0                                         # $s0 = file descriptor
+    la      $a1,                    float_string
+    move    $a2,                    $s5                                         # $a2 = length of the float_string 
     syscall
     
     # Test
@@ -302,8 +314,8 @@ syscall
 
 print_space:
     move      $a0,                    $s0                       # $a0 = file descriptor
-    la    $a1,                    space
-    la    $a2,                    1
+    la      $a1,                    space
+    la      $a2,                    1
     li      $v0,                    15
     syscall
     j       write_loop
