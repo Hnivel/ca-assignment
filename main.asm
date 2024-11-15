@@ -14,9 +14,9 @@ N:                  .word   0
 M:                  .word   0
 padding:            .word   0
 stride:             .word   0
-temporary:          .space  16
+temp_buffer:    .space 32
 float_string:       .space  32
-ten:                .float  10.0
+scale_factor:       .float  10.0
 space:              .asciiz " "
     ########################################################################################################################
 .text
@@ -239,15 +239,15 @@ output_result:
     lw      $t2,                    padding                                     # $t2 = padding
     lw      $t3,                    stride                                      # $t3 = stride
 
-    add     $t4,                    $t2,                $t2                     # $t4 = 2 * p
-    add     $t5,                    $t0,                $t4                     # $t5 = N + 2 * p
-    sub     $t5,                    $t5,                $t1                     # $t5 = N + 2 * p - M
+    add     $t4,                    $t2,                $t2                     # $t4 = 2 * padding
+    add     $t5,                    $t0,                $t4                     # $t5 = N + 2 * padding
+    sub     $t5,                    $t5,                $t1                     # $t5 = N + 2 * padding - M
 
     div     $t5,                    $t3
-    mflo    $t5                                                                 # $t5 = (N + 2 * p - M) / s
+    mflo    $t5                                                                 # $t5 = (N + 2 * padding - M) / s
 
-    addi    $t5,                    $t5,                1                       # $t5 = (N + 2 * p - M) / s + 1
-    mul     $t5,                    $t5,                $t5                     # $t5 = ((N + 2 * p - M) / s + 1) ^ 2 = output_matrix_size
+    addi    $s1,                    $t5,                1                       # $s1 = (N + 2 * padding - M) / s + 1
+    mul     $s1,                    $s1,                $s1                     # $t5 = ((N + 2 * padding - M) / s + 1) ^ 2 = output_matrix_size
 
     # Functionality: Open the output file (output_matrix.txt) (Finished)
 
@@ -267,22 +267,23 @@ output_result:
     # Return: Output matrix in the output file
     # Status: Finished
 
-    la      $t6,                    out
-    li      $t7,                    0                                           # Counter for output matrix elements
+    la      $s2,                    out
+    li      $s3,                    0                                           # Counter for output matrix elements
 
 write_loop:
-    bge     $t7,                    $t5,                close_file              # If loop counter reaches size, end loop
+    bge     $s3,                    $s1,                close_file              # If loop counter reaches size, end loop
 
     # Functionality: Print the next element in the output matrix
 
-    lwc1    $f12,                   0($t6)                                      # $f12 = next element in the output matrix
-    addiu   $t6,                    $t6,                4                       # Move to the next element in the output matrix
+    l.s    $f12,                   0($s2)                                       # $f12 = next element in the output matrix
+    addiu   $s2,                    $s2,                4                       # Move to the next element in the output matrix
 
     # Functionality: Write the element to the output file
 
     jal     float_to_string
     la      $a1,                    float_string
     li      $v0,                    15
+    li      $a2,                    3 
     move    $a0,                    $s0                                         # $s0 = file descriptor
     syscall
     
@@ -295,13 +296,15 @@ syscall
 
     # Functionality: Increment the loop counter and print space if not the last element
 
-    addi    $t7,                    $t7,                1                       # $t2 = $t2 + 1
-    blt     $t7,                    $t5,                print_space             # If not the last element, print space
+    addi    $s3,                    $s3,                1                       # $t2 = $t2 + 1
+    blt     $s3,                    $s1,                print_space             # If not the last element, print space
     j       write_loop
 
 print_space:
-    li      $a0,                    ' '                       # $a0 = ' '
-    li      $v0,                    11
+    move      $a0,                    $s0                       # $a0 = file descriptor
+    la    $a1,                    space
+    la    $a2,                    1
+    li      $v0,                    15
     syscall
     j       write_loop
 
@@ -610,91 +613,88 @@ combine_parts:
     # Return: $a0 = address of the string
     # Status: ????
 float_to_string:
-    # Initialize pointers
-    la      $a0, float_string                   # Load buffer address
-    li      $t0, 0                              # Index for buffer
+    la      $a0, float_string            # $a0 = address of the string
+    li      $t0, 0                       # $t0 = 0 = counter for string length
 
     # Handle negative numbers
-    mfc1    $t1, $f12                           # Convert float to integer to check sign
-    bltz    $t1, handle_negative
+    mfc1    $t1, $f12                    # $t1 = floating-point number as integer
+    bltz    $t1, handle_negative         # If $t1 < 0, handle negative number
 
 process_float:
-    # Extract integer part
-    trunc.w.s $f1, $f12                         # Truncate float to integer
-    mfc1    $t1, $f1                            # Move integer part to $t1
+    
+    # Functionality: Truncate the floating-point number to integer part
 
-    # Convert integer part to string directly in this function
+    trunc.w.s $f1, $f12                  # $f1 = truncate($f12) = integer part
+    mfc1    $t1, $f1                     # $t1 = integer part
+
+    # Functionality: Convert the integer part to a string
+
 convert_integer:
-    beq     $t1, $zero, handle_zero             # Handle zero case
+    beq     $t1, $zero, handle_zero      # If integer part is zero, handle zero
+    la      $a1, temp_buffer             # $a1 = address of the temp buffer
+    li      $t2, 0                       # $t2 = 0 = counter for temp buffer
+
 integer_loop:
-    div     $t1, $t1, 10                        # Divide integer by 10
-    mfhi    $t2                                 # Get remainder
-    addi    $t2, $t2, 48                        # Convert to ASCII
-    sb      $t2, 0($a0)                         # Store digit
-    addi    $a0, $a0, 1                         # Move to next buffer position
-    mflo    $t1                                 # Get quotient
-    bnez    $t1, integer_loop                   # Repeat until quotient is zero
 
-    # Reverse the integer part
-    la      $a1, float_string                   # Start of the string
-    subu    $a0, $a0, 1                         # End of the string
+    divu    $t3, $t1, 10                 # $t3 = $t1 / 10 = quotient
+    mfhi    $t4                          # $t4 = $t1 % 10 = remainder
+    addi    $t4, $t4, 48                 # $t4 = $t4 + '0' = ASCII digit
+    sb      $t4, 0($a1)                  # Store digit in temp buffer
+    addi    $a1, $a1, 1                  # $a1 = $a1 + 1 = move to the next buffer position
+    mflo    $t1                          # $t1 = $t3 = quotient
+    bnez    $t1, integer_loop            # If $t1 != 0, repeat for the next digit
+
+    # Functionality: Reverse the integer part string
+
+    la      $t5, temp_buffer             # $t5 = address of the temp buffer
+    sub     $t6, $a1, $t5                # $t6 = $a1 - $t5 = length of the integer part string
+
 reverse_integer:
-    lb      $t2, 0($a0)                         # Load character
-    sb      $t2, 0($a1)                         # Store at reversed position
-    addi    $a1, $a1, 1                         # Move forward
-    subi    $a0, $a0, 1                         # Move backward
-    bgez    $a0, reverse_integer                # Continue reversing
-    move    $a0, $a1                            # Reset $a0 to end of reversed integer part
+    addi    $t6, $t6, -1                 # $t6 = $t6 - 1
+    subi    $a1, $a1, 1                  # $a1 = $a1 - 1
+    lb      $t3, 0($a1)                  # Load character from temporary buffer
+    sb      $t3, 0($a0)                  # Store character in main buffer
+    addi    $a0, $a0, 1                  # $a0 = $a0 + 1 = move to the next buffer position
+    bnez    $t6, reverse_integer         # If $t6 != 0, repeat for the next character
 
-add_decimal_point:
-    li      $t2, '.'                            # Decimal point
-    sb      $t2, 0($a0)                         # Append decimal point
-    addi    $a0, $a0, 1
+    # Functionality: Append decimal point to the string
 
-    # Extract fractional part
-    sub.s   $f12, $f12, $f1                     # Fractional part = float - integer
-    l.s     $f2, ten                            # Load 10 into $f2
-    mul.s   $f12, $f12, $f2                     # Scale fractional part by 10
+    li      $t4, '.'                     # $t4 = '.'
+    sb      $t4, 0($a0)                  # Store decimal point in main buffer
+    addi    $a0, $a0, 1                  # $a0 = $a0 + 1 = move to the next buffer position
 
-    # Convert fractional part directly in this function
-convert_fraction:
-    trunc.w.s $f1, $f12                         # Truncate fractional part to integer
-    mfc1    $t1, $f1                            # Move fractional part to $t1
-    beq     $t1, $zero, end_float_to_string     # If fractional part is zero, terminate
-fraction_loop:
-    div     $t1, $t1, 10                        # Divide fractional part by 10
-    mfhi    $t2                                 # Get remainder
-    addi    $t2, $t2, 48                        # Convert to ASCII
-    sb      $t2, 0($a0)                         # Store digit
-    addi    $a0, $a0, 1                         # Move to next buffer position
-    mflo    $t1                                 # Get quotient
-    bnez    $t1, fraction_loop                  # Repeat until quotient is zero
+    # Functionality: Convert the fractional part to a string
 
-    # Reverse the fractional part
-    subu    $a0, $a0, 1                         # End of the string
-reverse_fraction:
-    lb      $t2, 0($a0)
-    sb      $t2, 0($a1)                         # Store at reversed position
-    addi    $a1, $a1, 1
-    subi    $a0, $a0, 1
-    bgez    $a0, reverse_fraction
+    sub.s   $f12, $f12, $f1              # $f12 = $f12 - $f1 = fractional part
+    l.s     $f2, scale_factor            # $f2 = 10.0 = scale factor
+    mul.s   $f12, $f12, $f2              # $f12 = $f12 * $f2 = fractional part * scale factor = fractional part * 10.0
+    
+    trunc.w.s $f1, $f12                  # $f1 = truncate($f12) = integer part of the fractional part
+    mfc1    $t1, $f1                     # $t1 = integer part of the fractional part
+    divu $t1, $t1, 10
+    mfhi $t1
+    # Functionality: Convert the fractional part to a string
 
-end_float_to_string:
-    sb      $zero, 0($a1)                       # Null-terminate the string
-    la      $a0, float_string                   # Load the string address
-    jr      $ra
+    addi    $t1, $t1, 48                 # $t1 = $t1 + '0' = ASCII digit
+    sb      $t1, 0($a0)                  # Store digit in main buffer
+    addi    $a0, $a0, 1                  # $a0 = $a0 + 1 = move to the next buffer position
+
+    # Null-terminate the string
+    sb      $zero, 0($a0)                # Null-terminate the string
+    la      $a0, float_string            # $a0 = address of the string
+    jr      $ra                          # Return
 
 handle_negative:
-    li      $t2, '-'                            # ASCII for '-'
-    sb      $t2, 0($a0)                         # Append negative sign
-    addi    $a0, $a0, 1                         # Move to next buffer position
-    neg.s   $f12, $f12                          # Make the float positive
-    j       process_float
+
+    li      $t3, '-'                     # #t3 = '-'
+    sb      $t3, 0($a0)                  # Store in main buffer
+    addi    $a0, $a0, 1                  # Move forward in main buffer
+    neg.s   $f12, $f12                   # $f12 = -$f12
+    j       process_float                # Continue processing
 
 handle_zero:
-    li      $t2, '0'
-    sb      $t2, 0($a0)
-    addi    $a0, $a0, 1
-    j       end_float_to_string
 
-
+    li      $t3, '0'                     # $t3 = '0'
+    sb      $t3, 0($a0)                  # Store in main buffer
+    addi    $a0, $a0, 1                  # Move forward in main buffer
+    j       process_float                # Continue processing
