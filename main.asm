@@ -232,8 +232,86 @@ next_pixel:
 
     ########################################################################################################################
     # Step 10: Print output result to terminal and output_matrix.txt (Unfinished)
+    
+output_result:
+    lw      $t0,                    N                                           # $t0 = N
+    lw      $t1,                    M                                           # $t1 = M
+    lw      $t2,                    padding                                     # $t2 = padding
+    lw      $t3,                    stride                                      # $t3 = stride
 
-    jal     output_result
+    add     $t4,                    $t2,                $t2                     # $t4 = 2 * p
+    add     $t5,                    $t0,                $t4                     # $t5 = N + 2 * p
+    sub     $t5,                    $t5,                $t1                     # $t5 = N + 2 * p - M
+
+    div     $t5,                    $t3
+    mflo    $t5                                                                 # $t5 = (N + 2 * p - M) / s
+
+    addi    $t5,                    $t5,                1                       # $t5 = (N + 2 * p - M) / s + 1
+    mul     $t5,                    $t5,                $t5                     # $t5 = ((N + 2 * p - M) / s + 1) ^ 2 = output_matrix_size
+
+    # Functionality: Open the output file (output_matrix.txt) (Finished)
+
+    li      $v0,                    13
+    la      $a0,                    output_filename
+    li      $a1,                    1
+    li      $a2,                    0
+    syscall
+    move    $s0,                    $v0                                         # $s0 = file descriptor
+
+    # Functionality: Check for file opening error (Finished)
+
+    bltz    $s0,                    Error_Output
+
+    # Functionality: Print the output matrix to the output file (output_matrix.txt)
+    # Arguments: out, output_matrix_size
+    # Return: Output matrix in the output file
+    # Status: Finished
+
+    la      $t6,                    out
+    li      $t7,                    0                                           # Counter for output matrix elements
+
+write_loop:
+    bge     $t7,                    $t5,                close_file              # If loop counter reaches size, end loop
+
+    # Functionality: Print the next element in the output matrix
+
+    lwc1    $f12,                   0($t6)                                      # $f12 = next element in the output matrix
+    addiu   $t6,                    $t6,                4                       # Move to the next element in the output matrix
+
+    # Functionality: Write the element to the output file
+
+    jal     float_to_string
+    la      $a1,                    float_string
+    li      $v0,                    15
+    move    $a0,                    $s0                                         # $s0 = file descriptor
+    syscall
+    
+    # Test
+    li $v0, 4
+la $a0, float_string
+syscall
+    #
+    
+
+    # Functionality: Increment the loop counter and print space if not the last element
+
+    addi    $t7,                    $t7,                1                       # $t2 = $t2 + 1
+    blt     $t7,                    $t5,                print_space             # If not the last element, print space
+    j       write_loop
+
+print_space:
+    li      $a0,                    ' '                       # $a0 = ' '
+    li      $v0,                    11
+    syscall
+    j       write_loop
+
+    # Functionality: Close the output file
+
+close_file:
+    li      $v0,                    16
+    move    $a0,                    $s0
+    syscall
+
 
     ########################################################################################################################
     # Step 11: Exit
@@ -274,17 +352,6 @@ parse_first_line:
     jr      $ra
 
     ########################################################################################################################
-    # Functionality: Pad the image matrix with zeros
-    # Arguments: image, N, padding
-    # Return: Padded image matrix
-    # Status: Unfinished
-
-padding_image_matrix:
-
-
-    jr      $ra
-
-    ########################################################################################################################
     # Functionality: Convolution operation
     # Arguments: N, M, padding, stride, image, kernel
     # Return: Output matrix
@@ -306,7 +373,7 @@ convolution_process:
 
     # Initialize pointers to image, kernel, and output matrix (Finished)
 
-    la      $s5,                    padding_image
+    la      $s5,                    padded_image
     la      $s6,                    kernel
     la      $s7,                    out
 
@@ -413,6 +480,16 @@ convolution_column:
     # Return: Output matrix with the normalized convolution result
 
     swc1    $f0,                    0($s7)
+    
+     # Test print
+    li      $v0,                    2                                           # syscall for printing double
+    mov.d   $f12,                   $f0                                         # move x2 to $f12 for printing
+    syscall
+
+    li      $v0,                    4
+    la      $a0,                    space
+    syscall
+    #
 
     # Functionality: Move the output matrix pointer to the next element
 
@@ -429,90 +506,6 @@ next_row:
     # Functionality: End of convolution operation
 
 end_convolution:
-
-    jr      $ra
-
-    ########################################################################################################################
-    # Functionality: Output result to terminal and output_matrix.txt
-    # Arguments: out
-    # Return: Output result
-    # Status: Unfinished
-
-output_result:
-
-    # Functionality: Calculate the size of the output matrix
-
-    lw      $t0,                    N                                           # $t0 = N
-    lw      $t1,                    M                                           # $t1 = M
-    lw      $t2,                    padding                                     # $t2 = padding
-    lw      $t3,                    stride                                      # $t3 = stride
-
-    add     $t4,                    $t2,                $t2                     # $t4 = 2 * p
-    add     $t5,                    $t0,                $t4                     # $t5 = N + 2 * p
-    sub     $t5,                    $t5,                $t1                     # $t5 = N + 2 * p - M
-
-    div     $t5,                    $t3
-    mflo    $t5                                                                 # $t5 = (N + 2 * p - M) / s
-
-    addi    $t5,                    $t5,                1                       # $t5 = (N + 2 * p - M) / s + 1
-    mul     $t5,                    $t5,                $t5                     # $t5 = ((N + 2 * p - M) / s + 1) ^ 2 = output_matrix_size
-
-    # Functionality: Open the output file (output_matrix.txt)
-
-    li      $v0,                    13
-    la      $a0,                    output_filename
-    li      $a1,                    1
-    li      $a2,                    0
-    syscall
-    move    $s0,                    $v0                                         # $s0 = file descriptor
-
-    # Functionality: Check for file opening error
-
-
-    bltz    $s0,                    Error_Output
-
-    # Functionality: Print the output matrix to the output file (output_matrix.txt)
-    # Arguments: out, output_matrix_size
-    # Return: Output matrix in the output file
-    # Status: Finished
-
-    la      $t6,                    out
-    li      $t7,                    0                                           # Counter for output matrix elements
-
-write_loop:
-    bge     $t7,                    $t5,                close_file              # If loop counter reaches size, end loop
-
-    # Functionality: Print the next element in the output matrix
-
-    lwc1    $f12,                   0($t6)                                      # $f12 = next element in the output matrix
-    addiu   $t6,                    $t6,                4                       # Move to the next element in the output matrix
-
-    # Functionality: Write the element to the output file
-
-    jal     float_to_string
-    la      $a1,                    float_string
-    li      $v0,                    15
-    move    $a0,                    $s0                                         # $s0 = file descriptor
-    syscall
-
-    # Functionality: Increment the loop counter and print space if not the last element
-
-    addi    $t7,                    $t7,                1                       # $t2 = $t2 + 1
-    blt     $t7,                    $t5,                print_space             # If not the last element, print space
-    j       write_loop
-
-print_space:
-    li      $a0,                    ' '                       # $a0 = ' '
-    li      $v0,                    11
-    syscall
-    j       write_loop
-
-    # Functionality: Close the output file
-
-close_file:
-    li      $v0,                    16
-    move    $a0,                    $s0
-    syscall
 
     jr      $ra
 
@@ -617,92 +610,91 @@ combine_parts:
     # Return: $a0 = address of the string
     # Status: ????
 float_to_string:
-    # Initialize
-    la      $a0,                    float_string
-    li      $t0,                    0                                           # Index for the string buffer
+    # Initialize pointers
+    la      $a0, float_string                   # Load buffer address
+    li      $t0, 0                              # Index for buffer
 
+    # Handle negative numbers
+    mfc1    $t1, $f12                           # Convert float to integer to check sign
+    bltz    $t1, handle_negative
+
+process_float:
     # Extract integer part
-    trunc.w.s $f1,                    $f12                                       # Truncate the float to get the integer part
-    mfc1    $t1,                    $f1                                         # Move the integer part to $t1
+    trunc.w.s $f1, $f12                         # Truncate float to integer
+    mfc1    $t1, $f1                            # Move integer part to $t1
 
-    # Convert integer part to string
-    jal     int_to_string
-    move    $a1,                    $v0                                         # $a1 = address of the integer string
+    # Convert integer part to string directly in this function
+convert_integer:
+    beq     $t1, $zero, handle_zero             # Handle zero case
+integer_loop:
+    div     $t1, $t1, 10                        # Divide integer by 10
+    mfhi    $t2                                 # Get remainder
+    addi    $t2, $t2, 48                        # Convert to ASCII
+    sb      $t2, 0($a0)                         # Store digit
+    addi    $a0, $a0, 1                         # Move to next buffer position
+    mflo    $t1                                 # Get quotient
+    bnez    $t1, integer_loop                   # Repeat until quotient is zero
 
-    # Copy integer string to float_string buffer
-copy_integer_string:
-    lb      $t2,                    0($a1)
-    beq     $t2,                    $zero,              copy_fractional_part
-    sb      $t2,                    0($a0)
-    addi    $a0,                    $a0,                1
-    addi    $a1,                    $a1,                1
-    j       copy_integer_string
+    # Reverse the integer part
+    la      $a1, float_string                   # Start of the string
+    subu    $a0, $a0, 1                         # End of the string
+reverse_integer:
+    lb      $t2, 0($a0)                         # Load character
+    sb      $t2, 0($a1)                         # Store at reversed position
+    addi    $a1, $a1, 1                         # Move forward
+    subi    $a0, $a0, 1                         # Move backward
+    bgez    $a0, reverse_integer                # Continue reversing
+    move    $a0, $a1                            # Reset $a0 to end of reversed integer part
 
-copy_fractional_part:
-    # Add decimal point
-    li      $t2,                    '.'
-    sb      $t2,                    0($a0)
-    addi    $a0,                    $a0,                1
+add_decimal_point:
+    li      $t2, '.'                            # Decimal point
+    sb      $t2, 0($a0)                         # Append decimal point
+    addi    $a0, $a0, 1
 
     # Extract fractional part
-    sub.s   $f12,                   $f12,               $f1                     # Subtract integer part from the float to get the fractional part
-    l.s     $f2,                    ten
-    mul.s   $f12,                   $f12,               $f2                     # Multiply fractional part by 10
+    sub.s   $f12, $f12, $f1                     # Fractional part = float - integer
+    l.s     $f2, ten                            # Load 10 into $f2
+    mul.s   $f12, $f12, $f2                     # Scale fractional part by 10
 
-    # Convert fractional part to string
-    jal     int_to_string
-    move    $a1,                    $v0                                         # $a1 = address of the fractional string
+    # Convert fractional part directly in this function
+convert_fraction:
+    trunc.w.s $f1, $f12                         # Truncate fractional part to integer
+    mfc1    $t1, $f1                            # Move fractional part to $t1
+    beq     $t1, $zero, end_float_to_string     # If fractional part is zero, terminate
+fraction_loop:
+    div     $t1, $t1, 10                        # Divide fractional part by 10
+    mfhi    $t2                                 # Get remainder
+    addi    $t2, $t2, 48                        # Convert to ASCII
+    sb      $t2, 0($a0)                         # Store digit
+    addi    $a0, $a0, 1                         # Move to next buffer position
+    mflo    $t1                                 # Get quotient
+    bnez    $t1, fraction_loop                  # Repeat until quotient is zero
 
-    # Copy fractional string to float_string buffer
-copy_fractional_string:
-    lb      $t2,                    0($a1)
-    beq     $t2,                    $zero,              end_float_to_string
-    sb      $t2,                    0($a0)
-    addi    $a0,                    $a0,                1
-    addi    $a1,                    $a1,                1
-    j       copy_fractional_string
+    # Reverse the fractional part
+    subu    $a0, $a0, 1                         # End of the string
+reverse_fraction:
+    lb      $t2, 0($a0)
+    sb      $t2, 0($a1)                         # Store at reversed position
+    addi    $a1, $a1, 1
+    subi    $a0, $a0, 1
+    bgez    $a0, reverse_fraction
 
 end_float_to_string:
-    sb      $zero,                  0($a0)                                      # Null-terminate the string
-    la      $a0,                    float_string
+    sb      $zero, 0($a1)                       # Null-terminate the string
+    la      $a0, float_string                   # Load the string address
     jr      $ra
 
-    # Functionality: Convert an integer to a string
-    # Arguments: $t1 = integer
-    # Return: $v0 = address of the string
-int_to_string:
-    # Initialize
-    la      $a0,                    buffer
-    li      $t0,                    0                                           # Index for the string buffer
-
-    # Handle zero case
-    beq     $t1,                    $zero,              handle_zero
-
-convert_loop:
-    div     $t1,                    $t1,                10                      # Divide integer by 10
-    mfhi    $t2                                                                 # Get the remainder
-    addi    $t2,                    $t2,                48                      # Convert remainder to ASCII
-    sb      $t2,                    0($a0)
-    addi    $a0,                    $a0,                1
-    mflo    $t1                                                                 # Get the quotient
-    bnez    $t1,                    convert_loop
-
-    # Reverse the string
-    la      $a1,                    buffer
-    subu    $a0,                    $a0,                1
-reverse_loop:
-    lb      $t2,                    0($a0)
-    sb      $t2,                    0($a1)
-    addi    $a1,                    $a1,                1
-    subi    $a0,                    $a0,                1
-    bgez    $a0,                    reverse_loop
-
-    sb      $zero,                  0($a1)                                      # Null-terminate the string
-    la      $v0,                    buffer
-    jr      $ra
+handle_negative:
+    li      $t2, '-'                            # ASCII for '-'
+    sb      $t2, 0($a0)                         # Append negative sign
+    addi    $a0, $a0, 1                         # Move to next buffer position
+    neg.s   $f12, $f12                          # Make the float positive
+    j       process_float
 
 handle_zero:
-    li      $t2,                    '0'
-    sb      $t2,                    0($a0)
-    addi    $a0,                    $a0,                1
-    j       reverse_loop
+    li      $t2, '0'
+    sb      $t2, 0($a0)
+    addi    $a0, $a0, 1
+    j       end_float_to_string
+
+
