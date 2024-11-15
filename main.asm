@@ -1,6 +1,7 @@
 .data
 image:              .space  196                                                 # Image matrix (7x7 floating-point)
 kernel:             .space  64                                                  # Kernel matrix (max 4x4 floating-point)
+padded_image:       .space  900                                                 # Padded image matrix (15x15 floating-point)
 out:                .space  196                                                 # Output matrix (7x7 floating-point)
 newline:            .asciiz "\n"                                                # Newline character
 buffer:             .space  1024                                                # Buffer
@@ -100,11 +101,15 @@ parse_image_loop:
     addi    $t3,                    $t3,                1
     j       parse_image_loop
 end_parse_image:
-   addi    $t0,                    $t0,                1 # skip newline
-    ####
+    addi    $t0,                    $t0,                1                       # skip newline
+
+###############
+   li      $v0,                    4
+    la      $a0,                    newline
+    syscall
 
     ########################################################################################################################
-    # Step 7: Read kernel matrix and store in `kernel` (Unfinished)
+    # Step 7: Read kernel matrix and store in `kernel` (Finished)
 
 read_kernel_matrix:
 
@@ -124,7 +129,7 @@ parse_kernel_loop:
     jal     floating_point_number
     swc1    $f0,                    0($t1)                                      # Store the parsed number in the kernel matrix
 
-   # Test print
+    # Test print
     li      $v0,                    2                                           # syscall for printing double
     mov.d   $f12,                   $f0                                         # move x2 to $f12 for printing
     syscall
@@ -133,7 +138,7 @@ parse_kernel_loop:
     la      $a0,                    space
     syscall
     #
-    
+
     # Functionality: Move to the next element in the kernel matrix
 
     addi    $t1,                    $t1,                4
@@ -141,12 +146,85 @@ parse_kernel_loop:
     j       parse_kernel_loop
 
 end_parse_kernel:
-
+###############
+   li      $v0,                    4
+    la      $a0,                    newline
+    syscall
     ########################################################################################################################
     # Step 8: Pad the image matrix with zeros (Unfinished)
+
 padding_image:
-    la      $t1,                    image
-    jal     padding_image_matrix
+
+    lw      $t0,                    N                                           # $t0 = N
+    lw      $t1,                    padding                                     # $t1 = padding
+
+    # Calculate the size of the padded image
+    add     $t2,                    $t0,                $t1                     # $t2 = $t0 + padding
+    add     $t2,                    $t2,                $t1                     # $t2 = $t2 + padding = N_padded
+
+    # Initialize pointers
+    la      $t3,                    image                                       # $t3 points to the original image
+    la      $t4,                    padded_image                                # $t4 points to the padded image
+    
+    ########################################################################################################################
+
+    # Initialize row counter
+    li      $t5,                    0                                           # $t5 = row counter
+
+row_loop:
+    li      $t6,                    0                                           # Reset column counter
+
+column_loop:
+    # Check if we are in the padding area (row)
+    blt     $t5,                    $t1,                pad_pixel               # If row < padding
+    bge     $t5,                    $t2,                pad_pixel               # If row >= N + padding
+
+    # Check if we are in the padding area (column)
+    blt     $t6,                    $t1,                pad_pixel               # If column < padding
+    bge     $t6,                    $t2,                pad_pixel               # If column >= N + padding
+
+    # Otherwise, copy the original image pixel
+    sub     $t7,                    $t5,                $t1                     # $t7 = $t5 - $t1 = row - padding
+    mul     $t7,                    $t7,                $t0                     # $t7 = $t7 * $t0 = (row - padding) * N
+    sub     $t8,                    $t6,                $t1                     # $t8 = $t6 - $t1 = column - padding
+    add     $t7,                    $t7,                $t8                     # $t7 = $t7 + $t8 = (row - padding) * N + (column - padding)
+    sll     $t7,                    $t7,                2                       # $t7 = $t7 << 2 = 4 * ((row - padding) * N + (column - padding))
+    add     $t7, $t3, $t7           # $t7 = address of the original image pixel
+    lwc1    $f0, 0($t7)             # Load the original image pixel (float)
+    swc1    $f0, 0($t4)             # Store it in the padded image (float)
+    # Test print
+    li      $v0,                    2                                           # syscall for printing double
+    mov.d   $f12,                   $f0                                         # move x2 to $f12 for printing
+    syscall
+
+    li      $v0,                    4
+    la      $a0,                    space
+    syscall
+    #
+    j       next_pixel
+
+pad_pixel:
+   li $t9, 0
+   mtc1 $t0, $f0
+    cvt.s.w $f0, $f0
+    swc1      $f0,                    0($t4)                                      # Store it in the padded image
+    # Test print
+    li      $v0,                    2                                           # syscall for printing double
+    mov.d   $f12,                   $f0                                         # move x2 to $f12 for printing
+    syscall
+
+    li      $v0,                    4
+    la      $a0,                    space
+    syscall
+    #
+next_pixel:
+    addi    $t6,                    $t6,                1                       # Increment column counter
+    addi    $t4,                    $t4,                4                       # Move the padded image pointer
+    bne     $t6,                    $t2,                column_loop             # Check if end of row
+
+    addi    $t5,                    $t5,                1                       # Increment row counter
+    bne     $t5,                    $t2,                row_loop                # Check if end of image
+
     ########################################################################################################################
     # Step 9: Convolution operation (Unfinished)
 
@@ -491,7 +569,7 @@ floating_point_number:
 convert_character_loop:
     lb      $t9,                    0($t0)                                      # Load next character from buffer
     addi    $t0,                    $t0,                1                       # Move buffer pointer to next character
-    beq     $t9,                    0,                 end_convert             # If space, number ends here
+    beq     $t9,                    0,                  end_convert             # If space, number ends here
     beq     $t9,                    32,                 end_convert             # If space, number ends here
     beq     $t9,                    13,                 end_convert             # If  \r, number ends here
     beq     $t9,                    46,                 fraction_part           # If '.', switch to fractional part
