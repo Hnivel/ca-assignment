@@ -172,6 +172,7 @@ syscall
 
     # Calculate the size of the padded image
     add     $t2,                    $t0,                $t1                     # $t2 = $t0 + $t1 = N + padding
+    move    $s7                  $t2
     add     $t2,                    $t2,                $t1                     # $t2 = $t2 + $t1 = N + padding * 2
 
     # Initialize pointers
@@ -189,11 +190,11 @@ row_loop:
 column_loop:
     # Check if we are in the padding area (row)
     blt     $t5,                    $t1,                pad_pixel               # If row < padding
-    bge     $t5,                    $t2,                pad_pixel               # If row >= N + padding
+    bge     $t5,                    $s7,                pad_pixel               # If row >= N + padding
 
     # Check if we are in the padding area (column)
     blt     $t6,                    $t1,                pad_pixel               # If column < padding
-    bge     $t6,                    $t2,                pad_pixel               # If column >= N + padding
+    bge     $t6,                    $s7,                pad_pixel               # If column >= N + padding
 
     # Otherwise, copy the original image pixel
     sub     $t7,                    $t5,                $t1                     # $t7 = $t5 - $t1 = row - padding
