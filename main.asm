@@ -3,7 +3,7 @@
 image:              .space  196                                                 # Image matrix (7x7 floating-point)
 kernel:             .space  64                                                  # Kernel matrix (max 4x4 floating-point)
 padded_image:       .space  900                                                 # Padded image matrix (15x15 floating-point)
-out:                .space  196                                                 # Output matrix (7x7 floating-point)
+out:                .space  576                                                 # Output matrix (12x12 floating-point)
 newline:            .asciiz "\n"                                                # Newline character
 buffer:             .space  1024                                                # Buffer
 input_filename:     .asciiz "input_matrix.txt"                                  # Input filename
@@ -22,7 +22,7 @@ stride:             .word   0
 temp_buffer:    .space 32
 float_string:       .space  32
 scale_factor:       .float  10.0
-half_value:         .float 0.5
+half_value:         .float 0.01
 zero_value:         .float 0.0
 space:              .asciiz " "
     ########################################################################################################################
@@ -464,7 +464,7 @@ next_kernel_row:
 save_output:
     # Round the convolution sum to 1 decimal place
     lwc1    $f4, scale_factor       # Load scale factor (10.0)
-    lwc1    $f6, half_value         # Load half value (0.5)
+    lwc1    $f6, half_value         # Load half value (0.01)
     lwc1    $f7, zero_value         # Load zero value (0.0)
     c.lt.s  $f0, $f7                # Check if the value is negative
     bc1t negative
