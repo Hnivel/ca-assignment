@@ -1,3 +1,4 @@
+
 .data
 image:              .space  196                                                 # Image matrix (7x7 floating-point)
 kernel:             .space  64                                                  # Kernel matrix (max 4x4 floating-point)
@@ -10,6 +11,10 @@ output_filename:    .asciiz "output_matrix.txt"                                 
 error_input:        .asciiz "Unable to open the input file"
 error_output:       .asciiz "Unable to open the input file"
 error_size:         .asciiz "Error: size not match"
+image_message: .asciiz "Image: "
+kernel_message: .asciiz "Kernel: "
+padded_image_message: .asciiz "Padded Image: " 
+result_message: .asciiz "\nResult: " 
 N:                  .word   0
 M:                  .word   0
 padding:            .word   0
@@ -65,6 +70,9 @@ main:
     # Step 6: Read image matrix and store in `image` (Finished)
 
 read_image_matrix:
+    li      $v0,            4
+    la      $a0,            image_message
+    syscall
     la      $t0,                    buffer
     addi    $t0,                    $t0,                17
 
@@ -112,7 +120,9 @@ end_parse_image:
     # Step 7: Read kernel matrix and store in `kernel` (Finished)
 
 read_kernel_matrix:
-
+   li      $v0,            4
+    la      $a0,           kernel_message
+    syscall
     la      $t1,                    kernel                                      # $t1 = address of the kernel matrix
     lw      $t2,                    M                                           # $t2 = M
     mul     $t2,                    $t2,                $t2                     # $t2 = M * M
@@ -154,13 +164,15 @@ end_parse_kernel:
     # Step 8: Pad the image matrix with zeros (Unfinished)
 
 padding_image:
-
+   li $v0, 4
+la $a0, padded_image_message
+syscall
     lw      $t0,                    N                                           # $t0 = N
     lw      $t1,                    padding                                     # $t1 = padding
 
     # Calculate the size of the padded image
-    add     $t2,                    $t0,                $t1                     # $t2 = $t0 + padding
-    add     $t2,                    $t2,                $t1                     # $t2 = $t2 + padding = N_padded
+    add     $t2,                    $t0,                $t1                     # $t2 = $t0 + $t1 = N + padding
+    add     $t2,                    $t2,                $t1                     # $t2 = $t2 + $t1 = N + padding * 2
 
     # Initialize pointers
     la      $t3,                    image                                       # $t3 points to the original image
@@ -194,7 +206,7 @@ column_loop:
     swc1    $f0, 0($t4)             # Store it in the padded image (float)
     # Test print
     li      $v0,                    2                                           # syscall for printing double
-    mov.d   $f12,                   $f0                                         # move x2 to $f12 for printing
+    mov.s   $f12,                   $f0                                         # move x2 to $f12 for printing
     syscall
 
     li      $v0,                    4
@@ -205,12 +217,12 @@ column_loop:
 
 pad_pixel:
    li $t9, 0
-   mtc1 $t0, $f0
+   mtc1 $t9, $f0
     cvt.s.w $f0, $f0
     swc1      $f0,                    0($t4)                                      # Store it in the padded image
     # Test print
     li      $v0,                    2                                           # syscall for printing double
-    mov.d   $f12,                   $f0                                         # move x2 to $f12 for printing
+    mov.s   $f12,                   $f0                                         # move x2 to $f12 for printing
     syscall
 
     li      $v0,                    4
@@ -269,7 +281,9 @@ output_result:
 
     la      $s2,                    out
     li      $s3,                    0                                           # Counter for output matrix elements
-
+   li      $v0,            4
+    la      $a0,            result_message
+    syscall
 write_loop:
     bge     $s3,                    $s1,                close_file              # If loop counter reaches size, end loop
 
@@ -302,6 +316,9 @@ end_count:
     # Test
     li $v0, 4
 la $a0, float_string
+syscall
+li $v0, 4
+la $a0, space
 syscall
     #
     
@@ -373,156 +390,98 @@ parse_first_line:
     # Status: Finished
 
 convolution_process:
+    lw $t0, N                  # Load N (original image size)
+    lw $t1, M                  # Load M (kernel size)
+    lw $t2, padding            # Load padding size
+    lw $t3, stride             # Load stride size
 
-    # Load N, M, padding, and stride values (Finished)
+    # Calculate padded size: padded_size = N + 2 * padding
+    add $t4, $t0, $t2
+    add $t4, $t4, $t2          # $t4 = padded_size
 
-    lw      $s0,                    N                                           # $s0 = N
-    lw      $s1,                    M                                           # $s1 = M
-    lw      $s2,                    padding                                     # $s2 = padding
-    lw      $s3,                    stride                                      # $s3 = stride
+    # Calculate output size: output_size = (padded_size - M) / stride + 1
+    sub $t5, $t4, $t1          # $t5 = padded_size - M
+    div $t5, $t5, $t3          # $t5 = (padded_size - M) / stride
+    add $t5, $t5, 1            # $t5 = output_size
 
-    # Calculate the size of the padded image (N_padded = N + 2 * padding) (Finished)
+    # Initialize indices for the output
+    li $t6, 0                  # Row index of the output
 
-    add     $s4,                    $s0,                $s2                     # $s4 = N + padding
-    add     $s4,                    $s4,                $s2                     # $s4 = N + 2 * padding
+convolution_row_loop:
+    bge $t6, $t5, end_process  # Exit if row index exceeds output size
+    li $t7, 0                  # Column index of the output
 
-    # Initialize pointers to image, kernel, and output matrix (Finished)
+col_loop:
+    bge $t7, $t5, next_row     # Exit if column index exceeds output size
 
-    la      $s5,                    padded_image
-    la      $s6,                    kernel
-    la      $s7,                    out
+    # Initialize convolution sum
+    mtc1 $zero, $f0            # Set convolution sum to 0.0
 
-    # Initialize row start at 0 for each kernel window (Finished)
+    # Loop through the kernel
+    li $t8, 0                  # Kernel row index
+kernel_row_loop:
+    bge $t8, $t1, save_output  # Exit if kernel row exceeds M
 
-    li      $t0,                    0                                           # $t0 = 0
+    li $t9, 0                  # Kernel column index
+kernel_col_loop:
+    bge $t9, $t1, next_kernel_row # Exit if kernel column exceeds M
 
-    # Outer loop for moving kernel window vertically (Finished)
+    # Calculate the corresponding indices in the padded_image
+    mul $s1, $t8, $t3          # Kernel row offset (scaled by stride)
+    add $s1, $s1, $t6          # Add output row index
+    mul $s1, $s1, $t4          # Apply padded row width
+    mul $s2, $t9, $t3          # Kernel column offset (scaled by stride)
+    add $s2, $s2, $t7          # Add output column index
+    add $s1, $s1, $s2          # Combine row and column offsets
+    add $s1, $s1, $t2          # Adjust for padding
+    sll $s1, $s1, 2            # Word align
+    lwc1 $f1, padded_image($s1) # Load padded_image value
 
-row:
+    # Load kernel value
+    mul $s2, $t8, $t1          # Kernel row offset
+    add $s2, $s2, $t9          # Add kernel column index
+    sll $s2, $s2, 2            # Word align
+    lwc1 $f2, kernel($s2)      # Load kernel value
 
-    # Check if remaining rows are enough for another kernel window
+    # Perform multiplication and accumulation
+    mul.s $f3, $f1, $f2        # Multiply padded_image and kernel values
+    add.s $f0, $f0, $f3        # Add to the convolution sum
 
-    sub     $t1,                    $s4,                $t0                     # $t1 = $s4 - $t0 = N_padded - row start = remaining rows
-    blt     $t1,                    $s1,                end_convolution         # If remaining rows < M, end convolution
+    # Increment kernel column index
+    addi $t9, $t9, 1
+    j kernel_col_loop
 
-    # Initialize column start at 0 for each row
+next_kernel_row:
+    # Increment kernel row index
+    addi $t8, $t8, 1
+    j kernel_row_loop
 
-    li      $t2,                    0                                           # $t2 = 0
+save_output:
+    # Round the convolution sum to 1 decimal place
+    lwc1 $f4, scale_factor     # Load scale factor (10.0)
+    mul.s $f0, $f0, $f4        # Multiply by scale factor
+    round.w.s $f5, $f0         # Round to the nearest integer
+    cvt.s.w $f5, $f5           # Convert back to float
+    div.s $f0, $f5, $f4        # Divide by scale factor
 
-column:
+    # Store the result in the output array
+    mul $s3, $t6, $t5          # Row offset in output
+    add $s3, $s3, $t7          # Add column index
+    sll $s3, $s3, 2            # Word align
+    swc1 $f0, out($s3)         # Store the rounded result
 
-    # Check if remaining columns are enough for another kernel window
-
-    sub     $t3,                    $s4,                $t2                     # $t3 = $s4 - $t2 = N_padded - column start = remaining columns
-    blt     $t3,                    $s1,                next_row                # If remaining columns < M, skip to next row
-
-    # Perform convolution at ($t0, $t2)
-
-    # Initialization
-
-    li      $a2,                    0
-    mtc1    $a2,                    $f0
-    cvt.s.w $f0,                    $f0                                         # $f0 = 0.0 = current_total
-
-    # Convolution calculation (nested loop over kernel elements)
-
-    li      $t4,                    0                                           # kernel_row_index
-
-convolution_row:
-
-    li      $t5,                    0                                           # kernel_column_index
-
-convolution_column:
-
-    # Functionality: Calculate the address of the current element in the padded image and kernel
-    # Arguments: $t0 = row_start, $t2 = column_start, $t4 = kernel_row_index, $t5 = kernel_column_index
-    # Return: Address of the current element in the padded image and kernel
-    # Status: Finished
-
-    mul     $t6,                    $s4,                $t4                     # $t6 = $s4 * $t4 = N_padded * kernel_row_index (current_row)
-    add     $t6,                    $t6,                $t2                     # $t6 = $t6 + $t2 = current_row + column_start (current_column)
-    add     $t6,                    $t6,                $t0                     # $t6 = $t6 + $t0 = current_column + row_start (current_element)
-    add     $t6,                    $t6,                $t5                     # $t6 = $t6 + $t5 = current_element + kernel_column_index (current_kernel_element)
-    sll     $t6,                    $t6,                2                       # $t6 = $t6 << 2 = 4 * current_kernel_element
-    add     $t6,                    $s5,                $t6                     # $t6 = $s5 + $t6 = address of the current element in the padded image
-
-    # Functionality: Calculate the address of the current element in the kernel
-    # Arguments: $t4 = kernel_row_index, $t5 = kernel_column_index
-    # Return: Address of the current element in the kernel
-    # Status: Finished
-
-    mul     $t7,                    $t4,                $s1                     # $t7 = $t4 * $s1 = kernel_row_index * M (current_row)
-    add     $t7,                    $t7,                $t5                     # $t7 = $t7 + $t5 = current_row + kernel_column_index (current_kernel_element)
-    sll     $t7,                    $t7,                2                       # $t7 = $t7 << 2 = 4 * current_kernel_element
-    add     $t7,                    $s6,                $t7                     # $t7 = $s6 + $t7 = address of the current element in the kernel
-
-    # Functionality: Load the current element in the padded image and kernel
-    # Arguments: $t6 = address of the current element in the padded image, $t7 = address of the current element in the kernel
-    # Return: Current element in the padded image and kernel
-    # Status: Finished
-
-    lwc1    $f1,                    0($t6)                                      # $f1 = padded_image_element
-    lwc1    $f2,                    0($t7)                                      # $f2 = kernel_element
-
-    mul.s   $f3,                    $f1,                $f2                     # $f3 = $f1 * $f2 = padded_image_element * kernel_element
-    add.s   $f0,                    $f0,                $f3                     # $f0 = $f0 + $f3 = current_total + padded_image_element * kernel_element
-
-    # Functionality: Move to the next column in the kernel
-
-    addi    $t5,                    $t5,                1
-    bne     $t5,                    $s1,                convolution_column      # If kernel_column_index < M, repeat for the next column
-
-    # Functionality: Move to the next row in the kernel
-
-    addi    $t4,                    $t4,                1
-    bne     $t4,                    $s1,                convolution_row         # If kernel_row_index < M, repeat for the next row
-
-    # Functionality: Normalize the convolution result by dividing by 10
-    # Arguments: $f0 = current_total
-    # Return: Normalized convolution result
-
-    li      $t8,                    10                                          # Load 10 into $t8
-    mtc1    $t8,                    $f4                                         # $f4 = 10.0
-    cvt.s.w $f4,                    $f4                                         # $f4 = 10.0
-
-    mul.s   $f0,                    $f0,                $f4                     # $f0 = $f0 * 10.0 = current_total * 10.0
-    round.w.s $f0,                    $f0                                        # $f0 = round($f0) = rounded_current_total
-    cvt.s.w $f0,                    $f0                                         # $f0 = (int)rounded_current_total
-    div.s   $f0,                    $f0,                $f4                     # $f0 = $f0 / 10.0 = (int)rounded_current_total / 10.0 = normalized_current_total
-
-    # Functionality: Store the normalized convolution result in the output matrix
-    # Arguments: $f0 = normalized_current_total
-    # Return: Output matrix with the normalized convolution result
-
-    swc1    $f0,                    0($s7)
-    
-     # Test print
-    li      $v0,                    2                                           # syscall for printing double
-    mov.d   $f12,                   $f0                                         # move x2 to $f12 for printing
-    syscall
-
-    li      $v0,                    4
-    la      $a0,                    space
-    syscall
-    #
-
-    # Functionality: Move the output matrix pointer to the next element
-
-    add     $t2,                    $t2,                $s3
-    addi    $s7,                    $s7,                4
-    j       column
-
-    # Functionality: Move the image matrix pointer to the next row
+    # Increment output column index
+    addi $t7, $t7, 1
+    j col_loop
 
 next_row:
-    add     $t0,                    $t0,                $s3
-    j       row
+    # Increment output row index
+    addi $t6, $t6, 1
+    j convolution_row_loop
 
-    # Functionality: End of convolution operation
-
-end_convolution:
-
-    jr      $ra
+end_process:
+    jr $ra
+      
 
     ########################################################################################################################
     # Functionality: Error message for file opening error
@@ -555,8 +514,23 @@ Error_Output:
     # Status: Finished
 
 Error_size:
-    li      $v0,                    4
-    la      $a0,                    error_size
+ # Functionality: Open the output file (output_matrix.txt) (Finished)
+
+    li      $v0,                    13
+    la      $a0,                    output_filename
+    li      $a1,                    1
+    li      $a2,                    0
+    syscall
+    move    $s0,                    $v0                                         # $s0 = file descriptor
+
+    # Functionality: Check for file opening error (Finished)
+
+    bltz    $s0,                    Error_Output
+    
+    li      $v0,                    15
+    move    $a0, $s0
+    la      $a1,                    error_size
+    la      $a2,                    21
     syscall
     j       Exit
 
@@ -573,6 +547,7 @@ floating_point_number:
     li      $t6,                    0                                           # Fractional part accumulator
     li      $t7,                    1                                           # Fractional divisor (to divide the fraction part)
     li      $t8,                    0                                           # Flag to indicate the fractional part
+    li      $s0                    0                                           # Flag to indicate negative number
 
 convert_character_loop:
     lb      $t9,                    0($t0)                                      # Load next character from buffer
@@ -581,6 +556,7 @@ convert_character_loop:
     beq     $t9,                    32,                 end_convert             # If space, number ends here
     beq     $t9,                    13,                 end_convert             # If  \r, number ends here
     beq     $t9,                    46,                 fraction_part           # If '.', switch to fractional part
+    beq     $t9,                    '-'                   negative_part
 
     # Convert character to integer value
     sub     $t9,                    $t9,                '0'                     # Convert ASCII to integer
@@ -600,7 +576,9 @@ integer_part:
 fraction_part:
     li      $t8,                    1                                           # Set flag to indicate fractional part
     j       convert_character_loop
-
+negative_part:
+   li       $s0,                   1
+   j convert_character_loop
 end_convert:
     # Combine integer and fractional parts into a floating-point number
     mtc1    $t5,                    $f0                                         # Move integer part to $f0
@@ -616,6 +594,10 @@ end_convert:
 
 combine_parts:
     add.s   $f0,                    $f0,                $f1                     # Add integer and fractional parts
+    beqz    $s0,        end_floating_point_number
+    neg.s   $f0, $f0
+    
+end_floating_point_number: 
     jr      $ra                                                                 # Return with result in $f0
 
     ########################################################################################################################
@@ -670,7 +652,9 @@ reverse_integer:
     bnez    $t6, reverse_integer         # If $t6 != 0, repeat for the next character
 
     # Functionality: Append decimal point to the string
-
+    #
+fraction:
+#
     li      $t4, '.'                     # $t4 = '.'
     sb      $t4, 0($a0)                  # Store decimal point in main buffer
     addi    $a0, $a0, 1                  # $a0 = $a0 + 1 = move to the next buffer position
@@ -709,4 +693,6 @@ handle_zero:
     li      $t3, '0'                     # $t3 = '0'
     sb      $t3, 0($a0)                  # Store in main buffer
     addi    $a0, $a0, 1                  # Move forward in main buffer
-    j       process_float                # Continue processing
+    #
+    j       fraction                # Continue processing
+    #
