@@ -22,6 +22,8 @@ stride:             .word   0
 temp_buffer:    .space 32
 float_string:       .space  32
 scale_factor:       .float  10.0
+half_value:         .float 0.5
+zero_value:         .float 0.0
 space:              .asciiz " "
     ########################################################################################################################
 .text
@@ -391,97 +393,110 @@ parse_first_line:
     # Status: Finished
 
 convolution_process:
-    lw $t0, N                  # Load N (original image size)
-    lw $t1, M                  # Load M (kernel size)
-    lw $t2, padding            # Load padding size
-    lw $t3, stride             # Load stride size
+    lw      $t0, N                  # Load N (original image size)
+    lw      $t1, M                  # Load M (kernel size)
+    lw      $t2, padding            # Load padding size
+    lw      $t3, stride             # Load stride size
 
     # Calculate padded size: padded_size = N + 2 * padding
-    add $t4, $t0, $t2
-    add $t4, $t4, $t2          # $t4 = padded_size
+    add     $t4, $t0, $t2
+    add     $t4, $t4, $t2           # $t4 = padded_size (N + 2 * padding)
 
     # Calculate output size: output_size = (padded_size - M) / stride + 1
-    sub $t5, $t4, $t1          # $t5 = padded_size - M
-    div $t5, $t5, $t3          # $t5 = (padded_size - M) / stride
-    add $t5, $t5, 1            # $t5 = output_size
+    sub     $t5, $t4, $t1           # $t5 = padded_size - M
+    div     $t5, $t5, $t3           # $t5 = (padded_size - M) / stride
+    add     $t5, $t5, 1             # $t5 = output_size
 
     # Initialize indices for the output
-    li $t6, 0                  # Row index of the output
+    li      $t6, 0                  # Row index of the output
 
 convolution_row_loop:
-    bge $t6, $t5, end_process  # Exit if row index exceeds output size
-    li $t7, 0                  # Column index of the output
+    bge     $t6, $t5, end_process   # Exit if row index exceeds output size
+    li      $t7, 0                  # Column index of the output
 
 col_loop:
-    bge $t7, $t5, next_row     # Exit if column index exceeds output size
+    bge     $t7, $t5, next_row      # Exit if column index exceeds output size
 
-    # Initialize convolution sum
-    mtc1 $zero, $f0            # Set convolution sum to 0.0
+    # Initialize convolution sum to 0.0
+    mtc1    $zero, $f0              # Set convolution sum to 0.0
 
     # Loop through the kernel
-    li $t8, 0                  # Kernel row index
+    li      $t8, 0                  # Kernel row index
 kernel_row_loop:
-    bge $t8, $t1, save_output  # Exit if kernel row exceeds M
+    bge     $t8, $t1, save_output   # Exit if kernel row exceeds M
 
-    li $t9, 0                  # Kernel column index
+    li      $t9, 0                  # Kernel column index
 kernel_col_loop:
-    bge $t9, $t1, next_kernel_row # Exit if kernel column exceeds M
+    bge     $t9, $t1, next_kernel_row # Exit if kernel column exceeds M
 
     # Calculate the corresponding indices in the padded_image
-    mul $s1, $t8, $t3          # Kernel row offset (scaled by stride)
-    add $s1, $s1, $t6          # Add output row index
-    mul $s1, $s1, $t4          # Apply padded row width
-    mul $s2, $t9, $t3          # Kernel column offset (scaled by stride)
-    add $s2, $s2, $t7          # Add output column index
-    add $s1, $s1, $s2          # Combine row and column offsets
-    add $s1, $s1, $t2          # Adjust for padding
-    sll $s1, $s1, 2            # Word align
-    lwc1 $f1, padded_image($s1) # Load padded_image value
+    mul     $s1, $t6, $t3           # Calculate the row offset in the padded image based on stride
+    mul     $s2, $t7, $t3           # Calculate the column offset in the padded image based on stride
+
+    add     $s1, $s1, $t8           # Adjust row index by kernel row
+    add     $s2, $s2, $t9           # Adjust column index by kernel column
+
+    # Calculate address in the padded image
+    mul     $s3, $s1, $t4           # Multiply row index by padded image width (padded_size)
+    add     $s3, $s3, $s2           # Add column index
+    sll     $s3, $s3, 2             # Word align the address
+    lwc1    $f1, padded_image($s3)  # Load the value from the padded image
 
     # Load kernel value
-    mul $s2, $t8, $t1          # Kernel row offset
-    add $s2, $s2, $t9          # Add kernel column index
-    sll $s2, $s2, 2            # Word align
-    lwc1 $f2, kernel($s2)      # Load kernel value
+    mul     $s5, $t8, $t1           # Kernel row offset
+    add     $s5, $s5, $t9           # Add kernel column index
+    sll     $s5, $s5, 2             # Word align the address
+    lwc1    $f2, kernel($s5)        # Load the value from the kernel
 
     # Perform multiplication and accumulation
-    mul.s $f3, $f1, $f2        # Multiply padded_image and kernel values
-    add.s $f0, $f0, $f3        # Add to the convolution sum
+    mul.s   $f3, $f1, $f2           # Multiply padded_image and kernel values
+    add.s   $f0, $f0, $f3           # Add to the convolution sum
 
     # Increment kernel column index
-    addi $t9, $t9, 1
-    j kernel_col_loop
+    addi    $t9, $t9, 1
+    j       kernel_col_loop
 
 next_kernel_row:
     # Increment kernel row index
-    addi $t8, $t8, 1
-    j kernel_row_loop
+    addi    $t8, $t8, 1
+    j       kernel_row_loop
 
 save_output:
     # Round the convolution sum to 1 decimal place
-    lwc1 $f4, scale_factor     # Load scale factor (10.0)
-    mul.s $f0, $f0, $f4        # Multiply by scale factor
-    round.w.s $f5, $f0         # Round to the nearest integer
-    cvt.s.w $f5, $f5           # Convert back to float
-    div.s $f0, $f5, $f4        # Divide by scale factor
+    lwc1    $f4, scale_factor       # Load scale factor (10.0)
+    lwc1    $f6, half_value         # Load half value (0.5)
+    lwc1    $f7, zero_value         # Load zero value (0.0)
+    c.lt.s  $f0, $f7                # Check if the value is negative
+    bc1t negative
+    j      rounding
 
+negative:
+    neg.s $f6, $f6
+rounding:
+    mul.s   $f0, $f0, $f4           # Multiply by scale factor
+    add.s  $f0, $f0, $f6           # Add half value
+    round.w.s $f5, $f0              # Round to the nearest integer
+    cvt.s.w $f5, $f5                # Convert back to float
+    div.s   $f0, $f5, $f4           # Divide by scale factor
+
+    lwc1    $f6, half_value
     # Store the result in the output array
-    mul $s3, $t6, $t5          # Row offset in output
-    add $s3, $s3, $t7          # Add column index
-    sll $s3, $s3, 2            # Word align
-    swc1 $f0, out($s3)         # Store the rounded result
+    mul     $s3, $t6, $t5           # Row offset in output
+    add     $s3, $s3, $t7           # Add column index
+    sll     $s3, $s3, 2             # Word align
+    swc1    $f0, out($s3)           # Store the rounded result
 
     # Increment output column index
-    addi $t7, $t7, 1
-    j col_loop
+    addi    $t7, $t7, 1
+    j       col_loop
 
 next_row:
     # Increment output row index
-    addi $t6, $t6, 1
-    j convolution_row_loop
+    addi    $t6, $t6, 1
+    j       convolution_row_loop
 
 end_process:
-    jr $ra
+    jr      $ra
       
 
     ########################################################################################################################
